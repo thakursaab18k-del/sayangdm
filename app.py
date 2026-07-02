@@ -5,54 +5,53 @@ from flask import Flask
 from pyrogram import Client
 
 app = Flask(__name__)
+# API details aapke wahi rahenge
+bot = Client("my_userbot", api_id=39965722, api_hash="e60871c8fe0fff37e2b299fbf839523a", session_string="...")
 
-API_ID = 39965722
-API_HASH = "e60871c8fe0fff37e2b299fbf839523a"
-SESSION_STRING = "..." # Aapki wahi purani session string yaha rahegi
+stats = {"total": 0, "sent": 0, "errors": 0, "logs": []}
 
-bot = Client("my_userbot", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING)
-stats = {"total": 0, "sent": 0, "skipped": 0, "logs": []}
-
-async def process_pending_requests():
-    """Bot start hote hi saare channels ki pending requests check karega"""
+async def run_bot_logic():
+    print("Bot starting...")
+    # 1. Purani requests fetch karo
     async for dialog in bot.get_dialogs():
         if dialog.chat.type in ["channel", "supergroup"]:
             try:
                 async for request in bot.get_chat_join_requests(dialog.chat.id):
-                    # Purani request process karein
                     await handle_dm(request)
-                    await asyncio.sleep(2) # Spam se bachne ke liye gap
-            except:
-                continue
+            except Exception as e:
+                print(f"Error in {dialog.chat.title}: {e}")
+    
+    # 2. Listener start karo
+    @bot.on_chat_join_request()
+    async def new_request(client, request):
+        await handle_dm(request)
+    
+    await bot.start()
+    print("Bot is listening...")
 
 async def handle_dm(request):
-    """DM bhejane ka common function"""
     stats["total"] += 1
     try:
         await bot.approve_chat_join_request(request.chat.id, request.from_user.id)
-        async for message in bot.get_chat_history("me", limit=1):
-            await bot.send_message(request.from_user.id, message.text)
+        # Saved messages check karo
+        async for msg in bot.get_chat_history("me", limit=1):
+            await bot.send_message(request.from_user.id, msg.text)
         stats["sent"] += 1
-        stats["logs"].append(f"Sent DM to: {request.from_user.first_name}")
+        stats["logs"].append(f"Sent to: {request.from_user.first_name}")
     except Exception as e:
-        stats["skipped"] += 1
-        stats["logs"].append(f"Error: {e}")
+        stats["errors"] += 1
+        stats["logs"].append(f"Err: {str(e)[:20]}")
 
-@bot.on_chat_join_request()
-async def on_new_request(client, request):
-    await handle_dm(request)
+def start_bot_thread():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(run_bot_logic())
+    loop.run_forever()
 
 @app.route('/')
 def index():
-    return f"<html><body><h1>Bot Status: Running</h1><pre>{chr(10).join(stats['logs'][-20:])}</pre></body></html>"
-
-def start_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    # Pehle purani requests process karein, phir listener chalaein
-    loop.run_until_complete(process_pending_requests())
-    bot.run()
+    return f"Logs: <pre>{chr(10).join(stats['logs'][-20:])}</pre>"
 
 if __name__ == "__main__":
-    threading.Thread(target=start_bot, daemon=True).start()
+    threading.Thread(target=start_bot_thread, daemon=True).start()
     app.run(host='0.0.0.0', port=10000)
